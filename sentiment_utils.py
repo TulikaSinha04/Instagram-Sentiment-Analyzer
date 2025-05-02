@@ -1,21 +1,16 @@
 from textblob import TextBlob
 
 def analyze_sentiment(text, hashtags=None):
-    # Start by analyzing the sentiment of the caption
     polarity = TextBlob(text).sentiment.polarity
 
-    # Modify sentiment based on hashtags
     if hashtags:
         for hashtag in hashtags:
-            # Consider sentiment of the hashtag text itself
             hashtag_sentiment = TextBlob(hashtag).sentiment.polarity
-            # Adjust overall sentiment based on hashtag sentiment
             if hashtag_sentiment > 0:
-                polarity += 0.1  # Positive hashtag, increase positivity
+                polarity += 0.1
             elif hashtag_sentiment < 0:
-                polarity -= 0.1  # Negative hashtag, increase negativity
+                polarity -= 0.1
 
-    # Determine the sentiment category based on adjusted polarity
     if polarity >= 0.5:
         return 'Very Positive'
     elif 0.1 <= polarity < 0.5:
@@ -27,9 +22,32 @@ def analyze_sentiment(text, hashtags=None):
     else:
         return 'Very Negative'
 
+
+def convert_to_int(value_str):
+    """
+    Converts string like '1.5k' or '3.2m' to integer (e.g., '1.5k' → 1500)
+    """
+    try:
+        value_str = value_str.strip().lower().replace(',', '')
+        if 'k' in value_str:
+            return int(float(value_str.replace('k', '')) * 1000)
+        elif 'm' in value_str:
+            return int(float(value_str.replace('m', '')) * 1000000)
+        else:
+            return int(float(value_str))
+    except:
+        return 0
+
 def calculate_engagement(followers, likes, comments):
     try:
-        followers = int(followers.replace('k','000').replace('m','000000').replace(',',''))
-        return round(((likes + comments) / followers) * 100, 2)
+        followers = convert_to_int(followers)
+        likes = int(likes)
+        comments = int(comments)
+
+        if followers <= 0:
+            return 0.0
+
+        engagement = ((likes + comments) / followers) * 100
+        return round(min(engagement, 100.0), 2)
     except:
         return 0.0
