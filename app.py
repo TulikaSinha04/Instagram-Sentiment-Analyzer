@@ -1,6 +1,6 @@
-from flask import Flask, render_template, request, redirect, url_for 
+from flask import Flask, render_template, request
 from scraper import scrape_instagram_data
-from sentiment_utils import analyze_sentiment
+from sentiment_utils import analyze_sentiment, calculate_engagement
 
 app = Flask(__name__)
 
@@ -21,31 +21,39 @@ def analyze():
     username = request.form['username']
     data = scrape_instagram_data(username)
 
-    sentiments = []
     zipped_data = []
+
+    followers_raw = data['followers']
 
     for i, caption in enumerate(data['captions']):
         hashtags = data['hashtags'][i]
-        sentiment = analyze_sentiment(caption, hashtags)  # Analyze sentiment using both caption and hashtags
-        sentiments.append(sentiment)
+        sentiment = analyze_sentiment(caption, hashtags)
 
         post_link = data['post_links'][i]
+        image = data['images'][i]
+        likes = data['likes'][i]
+        comments = data['comments'][i]
 
-        # Store mapping for filter view
+        engagement_rate = calculate_engagement(followers_raw, likes, comments)
+
         sentiment_post_map[sentiment].append((caption, post_link))
 
-        # For results view
-        zipped_data.append((post_link, caption, hashtags, sentiment))
+        zipped_data.append({
+            'link': post_link,
+            'caption': caption,
+            'hashtags': hashtags,
+            'sentiment': sentiment,
+            'image': image,
+            'likes': likes,
+            'comments': comments,
+            'engagement_rate': engagement_rate
+        })
 
     result = {
         'username': username,
         'posts': data['posts'],
         'followers': data['followers'],
         'following': data['following'],
-        'links': data['post_links'],
-        'captions': data['captions'],
-        'hashtags': data['hashtags'],
-        'sentiments': sentiments
     }
 
     return render_template('results.html', result=result, zipped=zipped_data)
