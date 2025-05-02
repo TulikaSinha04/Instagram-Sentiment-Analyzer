@@ -1,0 +1,8 @@
+instagram-analyzer (main folder)
+|_app.py
+|_scraper.py
+|_sentiment_utils.py
+|_templates (folder name)
+  |_index.html
+  |_filter.html
+  |_results.html
