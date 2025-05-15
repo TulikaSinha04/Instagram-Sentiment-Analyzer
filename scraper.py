@@ -1,154 +1,67 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
-import time
+from flask import Flask, render_template, request
+from scraper import scrape_instagram_data
+from sentiment_utils import analyze_sentiment, calculate_engagement
 
-def init_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=options)
+app = Flask(__name__)
 
-def scrape_instagram_data(username):
-    url = f"https://www.instagram.com/{username}/"
-    driver = init_driver()
-    driver.get(url)
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+sentiment_post_map = {
+    'Very Positive': [],
+    'Positive': [],
+    'Neutral': [],
+    'Negative': [],
+    'Very Negative': []
+}
 
-    time.sleep(5)
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    username = request.form['username']
+    data = scrape_instagram_data(username)
 
-    posts = followers = following = "Unknown"
-    try:
-        spans = soup.find_all('span')
-        for span in spans:
-            text = span.get_text().replace(',', '')
-            if 'followers' in text.lower():
-                followers = text.split(' ')[0]
-            elif 'following' in text.lower():
-                following = text.split(' ')[0]
-            elif 'posts' in text.lower():
-                posts_text = text.split(' ')[0]
-                posts = ''.join(filter(str.isdigit, posts_text))
-    except:
-        pass
+    zipped_data = []
 
-    post_links = []
-    captions = []
-    hashtags = []
-    likes_list = []
-    comments_list = []
-    images = []
-    engagement_rates = []
+    followers_raw = data['followers']
 
-    links = soup.find_all('a')
-    for link in links:
-        href = link.get('href')
-        if href and "/p/" in href:
-            post_url = "https://www.instagram.com" + href
-            if post_url not in post_links:
-                post_links.append(post_url)
-            if len(post_links) >= 10:
-                break
+    for i, caption in enumerate(data['captions']):
+        hashtags = data['hashtags'][i]
+        sentiment = analyze_sentiment(caption, hashtags)
 
-    def convert_to_int(value_str):
-        try:
-            value_str = value_str.strip().lower().replace(',', '')
-            if 'k' in value_str:
-                return int(float(value_str.replace('k', '')) * 1000)
-            elif 'm' in value_str:
-                return int(float(value_str.replace('m', '')) * 1000000)
-            else:
-                return int(float(value_str))
-        except:
-            return 0
+        post_link = data['post_links'][i]
+        image = data['images'][i]
+        likes = data['likes'][i]
+        comments = data['comments'][i]
 
-    follower_count = convert_to_int(followers)
+        engagement_rate = calculate_engagement(followers_raw, likes, comments)
 
-    for post_url in post_links:
-        driver.get(post_url)
-        time.sleep(3)
-        post_soup = BeautifulSoup(driver.page_source, 'html.parser')
+        sentiment_post_map[sentiment].append((caption, post_link))
 
-        caption = ""
-        hash_tags = []
-        try:
-            desc_meta = post_soup.find('meta', property='og:description')
-            if desc_meta:
-                caption = desc_meta['content']
-                hash_tags = [tag for tag in caption.split() if tag.startswith('#')]
-        except:
-            pass
+        zipped_data.append({
+            'link': post_link,
+            'caption': caption,
+            'hashtags': hashtags,
+            'sentiment': sentiment,
+            'image': image,
+            'likes': likes,
+            'comments': comments,
+            'engagement_rate': engagement_rate
+        })
 
-        img_url = ""
-        try:
-            img_meta = post_soup.find('meta', property='og:image')
-            if img_meta:
-                img_url = img_meta['content']
-        except:
-            pass
-
-        captions.append(caption)
-        hashtags.append(hash_tags)
-        images.append(img_url)
-
-        likes = 0
-        comments = 0
-
-        try:
-            spans = post_soup.find_all('span')
-            for span in spans:
-                if 'like' in span.text.lower():
-                    text = span.text.strip().lower()
-                    if 'k' in text:
-                        likes = int(float(text.split()[0].replace('k', '')) * 1000)
-                    elif 'm' in text:
-                        likes = int(float(text.split()[0].replace('m', '')) * 1000000)
-                    else:
-                        likes = int(text.split()[0].replace(',', ''))
-                    break
-        except:
-            pass
-
-        try:
-            comment_blocks = post_soup.find_all('ul')
-            for block in comment_blocks:
-                li_tags = block.find_all('li')
-                comments = len(li_tags) - 1
-                break
-        except:
-            pass
-
-        likes_list.append(likes)
-        comments_list.append(comments)
-
-        if follower_count > 0:
-            engagement = ((likes + comments) / follower_count) * 100
-            engagement = round(min(engagement, 100.0), 2)
-        else:
-            engagement = 0.0
-        engagement_rates.append(engagement)
-
-    driver.quit()
-
-    return {
+    result = {
         'username': username,
-        'posts': int(posts) if posts.isdigit() else 0,
-        'followers': followers,
-        'following': following,
-        'post_links': post_links,
-        'captions': captions,
-        'hashtags': hashtags,
-        'likes': likes_list,
-        'comments': comments_list,
-        'images': images,
-        'engagement_rates': engagement_rates
+        'posts': data['posts'],
+        'followers': data['followers'],
+        'following': data['following'],
     }
+
+    return render_template('results.html', result=result, zipped=zipped_data)
+
+@app.route('/filter/<mood>')
+def filter_by_mood(mood):
+    posts = sentiment_post_map.get(mood, [])
+    return render_template('filter.html', mood=mood, posts=posts)
+
+if __name__ == '__main__':
+    app.run(debug=True)
